@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Filter, MoreHorizontal, Pencil, Trash2, Send, Eye, X } from 'lucide-react'
+import { Plus, Search, Filter, MoreHorizontal, Pencil, Trash2, Send, Eye, X, Download } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/integrations/supabase'
 import type { Tracker, Franchise } from '@/integrations/supabase/types'
@@ -44,10 +45,16 @@ export function TrackersPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showSendModal, setShowSendModal] = useState(false)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
   const [selectedTracker, setSelectedTracker] = useState<TrackerWithFranchise | null>(null)
 
   // Form states
   const [newTracker, setNewTracker] = useState({
+    serial_number: '',
+    model: '',
+    notes: '',
+  })
+  const [editTracker, setEditTracker] = useState({
     serial_number: '',
     model: '',
     notes: '',
@@ -151,11 +158,53 @@ export function TrackersPage() {
 
     try {
       const { error } = await supabase.from('trackers').delete().eq('id', id)
-      if (error) throw error
+      if (error) {
+        alert(`Erro ao excluir rastreador: ${error.message}`)
+        return
+      }
       fetchTrackers()
     } catch (error) {
       console.error('Error deleting tracker:', error)
+      alert('Erro inesperado ao excluir rastreador')
     }
+  }
+
+  const handleEditTracker = async () => {
+    if (!selectedTracker) return
+
+    try {
+      const { error } = await supabase
+        .from('trackers')
+        .update({
+          serial_number: editTracker.serial_number,
+          model: editTracker.model || null,
+          notes: editTracker.notes || null,
+        })
+        .eq('id', selectedTracker.id)
+
+      if (error) {
+        alert(`Erro ao editar rastreador: ${error.message}`)
+        return
+      }
+
+      setShowEditModal(false)
+      setSelectedTracker(null)
+      setEditTracker({ serial_number: '', model: '', notes: '' })
+      fetchTrackers()
+    } catch (error) {
+      console.error('Error editing tracker:', error)
+      alert('Erro inesperado ao editar rastreador')
+    }
+  }
+
+  const openEditModal = (tracker: TrackerWithFranchise) => {
+    setSelectedTracker(tracker)
+    setEditTracker({
+      serial_number: tracker.serial_number,
+      model: tracker.model || '',
+      notes: tracker.notes || '',
+    })
+    setShowEditModal(true)
   }
 
   const getStatusBadge = (status: string) => {
@@ -186,6 +235,76 @@ export function TrackersPage() {
     return new Date(dateString).toLocaleDateString('pt-BR')
   }
 
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'estoque':
+        return 'Em Estoque'
+      case 'enviado':
+        return 'Enviado'
+      case 'recebido':
+        return 'Recebido'
+      case 'instalado':
+        return 'Instalado'
+      case 'defeito':
+        return 'Defeito'
+      default:
+        return status
+    }
+  }
+
+  const handleExportExcel = () => {
+    const dataToExport = filteredTrackers.map((tracker) => ({
+      'Número de Série': tracker.serial_number,
+      'Modelo': tracker.model || '-',
+      'Status': getStatusLabel(tracker.status),
+      'Franquia': tracker.franchises?.name || '-',
+      'Data de Envio': formatDate(tracker.sent_at),
+      'Data de Recebimento': formatDate(tracker.received_at),
+      'Data de Instalação': formatDate(tracker.installed_at),
+      'Nome do Cliente': tracker.client_name || '-',
+      'CNPJ/CPF do Cliente': tracker.client_cnpj || '-',
+      'Contato do Cliente': tracker.client_contact || '-',
+      'Placa do Veículo': tracker.vehicle_plate || '-',
+      'Chassi do Veículo': tracker.vehicle_chassis || '-',
+      'Tipo do Veículo': tracker.vehicle_type || '-',
+      'Marca do Veículo': tracker.vehicle_brand || '-',
+      'Modelo do Veículo': tracker.vehicle_model || '-',
+      'Ano do Veículo': tracker.vehicle_year || '-',
+      'Mês de Instalação': tracker.installation_month || '-',
+      'Observações': tracker.notes || '-',
+    }))
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Rastreadores')
+
+    // Ajustar largura das colunas
+    const columnWidths = [
+      { wch: 20 }, // Número de Série
+      { wch: 15 }, // Modelo
+      { wch: 12 }, // Status
+      { wch: 25 }, // Franquia
+      { wch: 15 }, // Data de Envio
+      { wch: 18 }, // Data de Recebimento
+      { wch: 18 }, // Data de Instalação
+      { wch: 30 }, // Nome do Cliente
+      { wch: 18 }, // CNPJ/CPF
+      { wch: 20 }, // Contato
+      { wch: 12 }, // Placa
+      { wch: 20 }, // Chassi
+      { wch: 15 }, // Tipo
+      { wch: 15 }, // Marca
+      { wch: 20 }, // Modelo Veículo
+      { wch: 10 }, // Ano
+      { wch: 15 }, // Mês Instalação
+      { wch: 30 }, // Observações
+    ]
+    worksheet['!cols'] = columnWidths
+
+    const fileName = `rastreadores_${new Date().toISOString().split('T')[0]}.xlsx`
+    XLSX.writeFile(workbook, fileName)
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -194,10 +313,16 @@ export function TrackersPage() {
           <p className="text-muted-foreground">Gerencie o estoque de rastreadores</p>
         </div>
         {(role === 'admin' || role === 'matriz') && (
-          <Button onClick={() => setShowAddModal(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Adicionar Rastreador
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleExportExcel}>
+              <Download className="w-4 h-4 mr-2" />
+              Exportar Excel
+            </Button>
+            <Button onClick={() => setShowAddModal(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Adicionar Rastreador
+            </Button>
+          </div>
         )}
       </div>
 
@@ -299,11 +424,13 @@ export function TrackersPage() {
                               Enviar para Franquia
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuItem>
-                            <Pencil className="w-4 h-4 mr-2" />
-                            Editar
-                          </DropdownMenuItem>
-                          {role === 'admin' && (
+                          {(role === 'admin' || role === 'matriz') && (
+                            <DropdownMenuItem onClick={() => openEditModal(tracker)}>
+                              <Pencil className="w-4 h-4 mr-2" />
+                              Editar
+                            </DropdownMenuItem>
+                          )}
+                          {(role === 'admin' || role === 'matriz') && (
                             <DropdownMenuItem
                               className="text-red-600"
                               onClick={() => handleDeleteTracker(tracker.id)}
@@ -413,6 +540,63 @@ export function TrackersPage() {
                 <Button onClick={handleSendTracker} disabled={!sendToFranchise}>
                   <Send className="w-4 h-4 mr-2" />
                   Enviar
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Edit Tracker Modal */}
+      {showEditModal && selectedTracker && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Editar Rastreador</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit_serial_number">Número de Série *</Label>
+                <Input
+                  id="edit_serial_number"
+                  value={editTracker.serial_number}
+                  onChange={(e) =>
+                    setEditTracker({ ...editTracker, serial_number: e.target.value })
+                  }
+                  placeholder="Ex: TRK-001234"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit_model">Modelo</Label>
+                <Input
+                  id="edit_model"
+                  value={editTracker.model}
+                  onChange={(e) => setEditTracker({ ...editTracker, model: e.target.value })}
+                  placeholder="Ex: GPS-Pro 2000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit_notes">Observações</Label>
+                <Input
+                  id="edit_notes"
+                  value={editTracker.notes}
+                  onChange={(e) => setEditTracker({ ...editTracker, notes: e.target.value })}
+                  placeholder="Notas adicionais..."
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowEditModal(false)
+                    setSelectedTracker(null)
+                    setEditTracker({ serial_number: '', model: '', notes: '' })
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button onClick={handleEditTracker} disabled={!editTracker.serial_number}>
+                  Salvar
                 </Button>
               </div>
             </CardContent>
