@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Package, Building2, Truck, AlertTriangle, CheckCircle2, Clock, Archive, ArrowRight } from 'lucide-react'
+import { Package, Building2, Truck, AlertTriangle, CheckCircle2, Archive, BarChart3 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/integrations/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 
 interface DashboardStats {
   totalTrackers: number
@@ -15,13 +14,10 @@ interface DashboardStats {
   totalFranchises: number
 }
 
-interface RecentMovement {
-  id: string
-  tracker_serial: string
-  from_status: string
-  to_status: string
-  franchise_name: string | null
-  created_at: string
+interface MonthlyData {
+  month: string
+  monthName: string
+  count: number
 }
 
 export function DashboardPage() {
@@ -35,8 +31,13 @@ export function DashboardPage() {
     trackersDefective: 0,
     totalFranchises: 0,
   })
-  const [recentMovements, setRecentMovements] = useState<RecentMovement[]>([])
+  const [monthlyStock, setMonthlyStock] = useState<MonthlyData[]>([])
   const [_isLoading, setIsLoading] = useState(true)
+
+  const MONTH_NAMES = [
+    'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+    'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
+  ]
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -84,69 +85,49 @@ export function DashboardPage() {
           totalFranchises: franchiseCount,
         })
 
-        let movementsQuery = supabase
-          .from('tracker_movements')
-          .select(`
-            id,
-            tracker_id,
-            from_status,
-            to_status,
-            to_franchise_id,
-            created_at
-          `)
-          .order('created_at', { ascending: false })
-          .limit(5)
+        // Buscar dados mensais de entrada no estoque (trackers criados por mês)
+        const currentYear = new Date().getFullYear()
+        const startOfYear = `${currentYear}-01-01T00:00:00.000Z`
+        const endOfYear = `${currentYear}-12-31T23:59:59.999Z`
+
+        let stockQuery = supabase
+          .from('trackers')
+          .select('created_at')
+          .gte('created_at', startOfYear)
+          .lte('created_at', endOfYear)
 
         if (role === 'franqueado' && profile?.franchise_id) {
-          movementsQuery = movementsQuery.eq('to_franchise_id', profile.franchise_id)
+          stockQuery = stockQuery.eq('franchise_id', profile.franchise_id)
         }
 
-        const { data: movements, error: movementsError } = await movementsQuery
+        const { data: stockData, error: stockError } = await stockQuery
 
-        if (movementsError) {
-          console.error('Error fetching movements:', movementsError)
+        if (stockError) {
+          console.error('Error fetching stock data:', stockError)
         }
 
-        if (movements && movements.length > 0) {
-          // Buscar os serial_numbers dos trackers separadamente
-          const trackerIds = movements.map(m => m.tracker_id)
-          const { data: trackersData } = await supabase
-            .from('trackers')
-            .select('id, serial_number')
-            .in('id', trackerIds)
-
-          const trackerMap = new Map(
-            trackersData?.map(t => [t.id, t.serial_number]) || []
-          )
-
-          // Buscar os nomes das franquias
-          const franchiseIds = movements
-            .map(m => m.to_franchise_id)
-            .filter((id): id is string => id !== null)
-
-          let franchiseMap = new Map<string, string>()
-          if (franchiseIds.length > 0) {
-            const { data: franchisesData } = await supabase
-              .from('franchises')
-              .select('id, name')
-              .in('id', franchiseIds)
-
-            franchiseMap = new Map(
-              franchisesData?.map(f => [f.id, f.name]) || []
-            )
-          }
-
-          setRecentMovements(
-            movements.map((m) => ({
-              id: m.id,
-              tracker_serial: trackerMap.get(m.tracker_id) || 'N/A',
-              from_status: m.from_status,
-              to_status: m.to_status,
-              franchise_name: m.to_franchise_id ? franchiseMap.get(m.to_franchise_id) || null : null,
-              created_at: m.created_at,
-            }))
-          )
+        // Inicializar contagem por mês
+        const monthCounts: Record<string, number> = {}
+        for (let i = 1; i <= 12; i++) {
+          const monthKey = i.toString().padStart(2, '0')
+          monthCounts[monthKey] = 0
         }
+
+        // Contar trackers por mês de criação
+        stockData?.forEach((tracker) => {
+          const date = new Date(tracker.created_at)
+          const month = (date.getMonth() + 1).toString().padStart(2, '0')
+          monthCounts[month]++
+        })
+
+        // Converter para array de dados mensais
+        const monthlyData: MonthlyData[] = Object.entries(monthCounts).map(([month, count]) => ({
+          month,
+          monthName: MONTH_NAMES[parseInt(month) - 1],
+          count,
+        }))
+
+        setMonthlyStock(monthlyData)
       } catch (error) {
         console.error('Error fetching dashboard data:', error)
       } finally {
@@ -156,50 +137,6 @@ export function DashboardPage() {
 
     fetchDashboardData()
   }, [role, profile?.franchise_id])
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'estoque':
-        return 'Em Estoque'
-      case 'enviado':
-        return 'Enviado'
-      case 'recebido':
-        return 'Recebido'
-      case 'instalado':
-        return 'Instalado'
-      case 'defeito':
-        return 'Defeito'
-      default:
-        return status
-    }
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'estoque':
-        return <Badge className="bg-[#6B73FF]/10 text-[#6B73FF] border-[#6B73FF]/20">{getStatusLabel(status)}</Badge>
-      case 'enviado':
-        return <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">{getStatusLabel(status)}</Badge>
-      case 'recebido':
-        return <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">{getStatusLabel(status)}</Badge>
-      case 'instalado':
-        return <Badge className="bg-[#4ADE80]/10 text-[#22c55e] border-[#4ADE80]/20">{getStatusLabel(status)}</Badge>
-      case 'defeito':
-        return <Badge className="bg-red-500/10 text-red-600 border-red-500/20">{getStatusLabel(status)}</Badge>
-      default:
-        return <Badge>{status}</Badge>
-    }
-  }
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
 
   const getFirstName = (fullName: string | null) => {
     if (!fullName) return 'Usuário'
@@ -401,42 +338,56 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Movimentações Recentes */}
+        {/* Entrada no Estoque - Gráfico Mensal */}
         <Card className="border-0 shadow-md">
           <CardHeader className="pb-4">
-            <CardTitle className="text-lg font-semibold text-[#1E3A5F]">Movimentações Recentes</CardTitle>
-            <p className="text-sm text-muted-foreground">Últimas atualizações de rastreadores</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg font-semibold text-[#1E3A5F]">Entrada no Estoque</CardTitle>
+                <p className="text-sm text-muted-foreground">Rastreadores adicionados por mês ({new Date().getFullYear()})</p>
+              </div>
+              <div className="h-10 w-10 rounded-xl bg-[#1E3A5F]/10 flex items-center justify-center">
+                <BarChart3 className="h-5 w-5 text-[#1E3A5F]" />
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            {recentMovements.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                  <Clock className="h-6 w-6 text-gray-400" />
-                </div>
-                <p className="text-sm text-muted-foreground">Nenhuma movimentação recente</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {recentMovements.map((movement) => (
-                  <div
-                    key={movement.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-[#1E3A5F] truncate">{movement.tracker_serial}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {formatDate(movement.created_at)}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      {getStatusBadge(movement.from_status)}
-                      <ArrowRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
-                      {getStatusBadge(movement.to_status)}
+            {(() => {
+              const maxCount = Math.max(...monthlyStock.map(m => m.count), 1)
+              const totalYear = monthlyStock.reduce((sum, m) => sum + m.count, 0)
+
+              return (
+                <div className="space-y-4">
+                  {/* Barra de gráfico */}
+                  <div className="flex items-end justify-between gap-1 h-40">
+                    {monthlyStock.map((data) => (
+                      <div key={data.month} className="flex-1 flex flex-col items-center gap-1">
+                        <span className="text-xs font-semibold text-[#1E3A5F]">
+                          {data.count > 0 ? data.count : ''}
+                        </span>
+                        <div
+                          className="w-full bg-gradient-to-t from-[#1E3A5F] to-[#6B73FF] rounded-t-sm transition-all duration-500 hover:opacity-80"
+                          style={{
+                            height: `${data.count > 0 ? (data.count / maxCount) * 100 : 4}%`,
+                            minHeight: '4px',
+                            opacity: data.count > 0 ? 1 : 0.3,
+                          }}
+                        />
+                        <span className="text-[10px] text-muted-foreground font-medium">{data.monthName}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Total do ano */}
+                  <div className="pt-4 border-t">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Total no ano</span>
+                      <span className="text-lg font-bold text-[#1E3A5F]">{totalYear} rastreadores</span>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              )
+            })()}
           </CardContent>
         </Card>
       </div>
