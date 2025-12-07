@@ -205,6 +205,3 @@ export type Profile = Database['public']['Tables']['profiles']['Row']
 export type Franchise = Database['public']['Tables']['franchises']['Row']
 export type Tracker = Database['public']['Tables']['trackers']['Row']
 export type TrackerMovement = Database['public']['Tables']['tracker_movements']['Row']
-
-// Re-export UserStatus para uso em outros arquivos
-export type { UserStatus }
