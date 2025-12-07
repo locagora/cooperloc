@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Filter, MoreHorizontal, Pencil, Trash2, Send } from 'lucide-react'
+import { Plus, Search, Filter, MoreHorizontal, Pencil, Trash2, Send, Eye, X } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/integrations/supabase'
 import type { Tracker, Franchise } from '@/integrations/supabase/types'
@@ -43,6 +43,7 @@ export function TrackersPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [showAddModal, setShowAddModal] = useState(false)
   const [showSendModal, setShowSendModal] = useState(false)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [selectedTracker, setSelectedTracker] = useState<TrackerWithFranchise | null>(null)
 
   // Form states
@@ -276,6 +277,17 @@ export function TrackersPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          {tracker.status === 'instalado' && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedTracker(tracker)
+                                setShowDetailsModal(true)
+                              }}
+                            >
+                              <Eye className="w-4 h-4 mr-2" />
+                              Ver Detalhes
+                            </DropdownMenuItem>
+                          )}
                           {tracker.status === 'estoque' && (role === 'admin' || role === 'matriz') && (
                             <DropdownMenuItem
                               onClick={() => {
@@ -401,6 +413,114 @@ export function TrackersPage() {
                 <Button onClick={handleSendTracker} disabled={!sendToFranchise}>
                   <Send className="w-4 h-4 mr-2" />
                   Enviar
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Installation Details Modal */}
+      {showDetailsModal && selectedTracker && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-lg">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-lg">Detalhes da Instalação</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Rastreador: <strong>{selectedTracker.serial_number}</strong>
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setShowDetailsModal(false)
+                  setSelectedTracker(null)
+                }}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Informações do Cliente */}
+              <div className="space-y-3">
+                <h3 className="font-semibold text-sm text-[#1E3A5F] border-b pb-2">Dados do Cliente</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Nome</p>
+                    <p className="font-medium">{selectedTracker.client_name || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">CNPJ/CPF</p>
+                    <p className="font-medium">{selectedTracker.client_cnpj || '-'}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">Contato</p>
+                    <p className="font-medium">{selectedTracker.client_contact || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informações do Veículo */}
+              <div className="space-y-3">
+                <h3 className="font-semibold text-sm text-[#1E3A5F] border-b pb-2">Dados do Veículo</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Placa</p>
+                    <p className="font-medium">{selectedTracker.vehicle_plate || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Chassi</p>
+                    <p className="font-medium">{selectedTracker.vehicle_chassis || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Tipo</p>
+                    <p className="font-medium">{selectedTracker.vehicle_type || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Marca</p>
+                    <p className="font-medium">{selectedTracker.vehicle_brand || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Modelo</p>
+                    <p className="font-medium">{selectedTracker.vehicle_model || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Ano</p>
+                    <p className="font-medium">{selectedTracker.vehicle_year || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informações da Instalação */}
+              <div className="space-y-3">
+                <h3 className="font-semibold text-sm text-[#1E3A5F] border-b pb-2">Dados da Instalação</h3>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Data de Instalação</p>
+                    <p className="font-medium">{formatDate(selectedTracker.installed_at)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Mês de Referência</p>
+                    <p className="font-medium">{selectedTracker.installation_month || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Franquia</p>
+                    <p className="font-medium">{selectedTracker.franchises?.name || '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowDetailsModal(false)
+                    setSelectedTracker(null)
+                  }}
+                >
+                  Fechar
                 </Button>
               </div>
             </CardContent>
