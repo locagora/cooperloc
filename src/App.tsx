@@ -12,6 +12,7 @@ import {
 } from '@/pages/auth'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { TrackersPage } from '@/pages/TrackersPage'
+import { EnviosPage } from '@/pages/EnviosPage'
 import { FranchisesPage } from '@/pages/FranchisesPage'
 import { MyTrackersPage } from '@/pages/MyTrackersPage'
 import { UnauthorizedPage } from '@/pages/UnauthorizedPage'
@@ -81,7 +82,7 @@ function App() {
               element={
                 <ProtectedRoute allowedRoles={['admin', 'matriz']}>
                   <Layout>
-                    <TrackersPage />
+                    <EnviosPage />
                   </Layout>
                 </ProtectedRoute>
               }

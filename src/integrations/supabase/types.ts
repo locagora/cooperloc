@@ -82,9 +82,10 @@ export interface Database {
           id: string
           serial_number: string
           model: string | null
-          status: 'estoque' | 'enviado' | 'instalado' | 'defeito'
+          status: 'estoque' | 'enviado' | 'recebido' | 'instalado' | 'defeito'
           franchise_id: string | null
           sent_at: string | null
+          received_at: string | null
           installed_at: string | null
           notes: string | null
           created_at: string
@@ -105,9 +106,10 @@ export interface Database {
           id?: string
           serial_number: string
           model?: string | null
-          status?: 'estoque' | 'enviado' | 'instalado' | 'defeito'
+          status?: 'estoque' | 'enviado' | 'recebido' | 'instalado' | 'defeito'
           franchise_id?: string | null
           sent_at?: string | null
+          received_at?: string | null
           installed_at?: string | null
           notes?: string | null
           created_at?: string
@@ -128,9 +130,10 @@ export interface Database {
           id?: string
           serial_number?: string
           model?: string | null
-          status?: 'estoque' | 'enviado' | 'instalado' | 'defeito'
+          status?: 'estoque' | 'enviado' | 'recebido' | 'instalado' | 'defeito'
           franchise_id?: string | null
           sent_at?: string | null
+          received_at?: string | null
           installed_at?: string | null
           notes?: string | null
           created_at?: string
@@ -196,7 +199,7 @@ export interface Database {
     Enums: {
       user_role: UserRole
       user_status: UserStatus
-      tracker_status: 'estoque' | 'enviado' | 'instalado' | 'defeito'
+      tracker_status: 'estoque' | 'enviado' | 'recebido' | 'instalado' | 'defeito'
     }
   }
 }

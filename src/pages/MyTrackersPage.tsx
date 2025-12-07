@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Search, Filter, Package, CheckCircle, X } from 'lucide-react'
+import { Search, Filter, Package, CheckCircle, X, Truck, PackageCheck } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/integrations/supabase'
 import type { Tracker } from '@/integrations/supabase/types'
@@ -112,10 +112,12 @@ export function MyTrackersPage() {
   }
 
   const handleInstallSubmit = async () => {
-    if (!selectedTracker) return
+    if (!selectedTracker || !profile?.id) return
 
     setIsSaving(true)
     try {
+      const previousStatus = selectedTracker.status
+
       const { error } = await supabase
         .from('trackers')
         .update({
@@ -139,6 +141,15 @@ export function MyTrackersPage() {
         return
       }
 
+      // Registrar movimentação
+      await supabase.from('tracker_movements').insert({
+        tracker_id: selectedTracker.id,
+        from_status: previousStatus,
+        to_status: 'instalado',
+        to_franchise_id: profile.franchise_id,
+        created_by: profile.id,
+      })
+
       handleCloseInstallModal()
       fetchTrackers()
     } catch (error) {
@@ -151,8 +162,11 @@ export function MyTrackersPage() {
 
   const handleMarkAsDefective = async (tracker: Tracker) => {
     if (!confirm('Tem certeza que deseja marcar este rastreador como defeituoso?')) return
+    if (!profile?.id) return
 
     try {
+      const previousStatus = tracker.status
+
       const { error } = await supabase
         .from('trackers')
         .update({
@@ -162,16 +176,65 @@ export function MyTrackersPage() {
         .eq('id', tracker.id)
 
       if (error) throw error
+
+      // Registrar movimentação
+      await supabase.from('tracker_movements').insert({
+        tracker_id: tracker.id,
+        from_status: previousStatus,
+        to_status: 'defeito',
+        to_franchise_id: profile.franchise_id,
+        created_by: profile.id,
+      })
+
       fetchTrackers()
     } catch (error) {
       console.error('Error updating tracker:', error)
     }
   }
 
+  const handleConfirmReceived = async (tracker: Tracker) => {
+    if (!profile?.id) return
+
+    try {
+      const previousStatus = tracker.status
+
+      const { error } = await supabase
+        .from('trackers')
+        .update({
+          status: 'recebido',
+          received_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', tracker.id)
+
+      if (error) {
+        console.error('Supabase error:', error)
+        alert(`Erro ao confirmar recebimento: ${error.message}`)
+        return
+      }
+
+      // Registrar movimentação
+      await supabase.from('tracker_movements').insert({
+        tracker_id: tracker.id,
+        from_status: previousStatus,
+        to_status: 'recebido',
+        to_franchise_id: profile.franchise_id,
+        created_by: profile.id,
+      })
+
+      fetchTrackers()
+    } catch (error) {
+      console.error('Error confirming receipt:', error)
+      alert('Erro inesperado ao confirmar recebimento')
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'enviado':
-        return <Badge variant="warning">Recebido</Badge>
+        return <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">Em Trânsito</Badge>
+      case 'recebido':
+        return <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">Recebido</Badge>
       case 'instalado':
         return <Badge variant="success">Instalado</Badge>
       case 'defeito':
@@ -196,7 +259,8 @@ export function MyTrackersPage() {
 
   const stats = {
     total: trackers.length,
-    received: trackers.filter((t) => t.status === 'enviado').length,
+    inTransit: trackers.filter((t) => t.status === 'enviado').length,
+    received: trackers.filter((t) => t.status === 'recebido').length,
     installed: trackers.filter((t) => t.status === 'instalado').length,
     defective: trackers.filter((t) => t.status === 'defeito').length,
   }
@@ -211,10 +275,10 @@ export function MyTrackersPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Total Recebido</CardTitle>
+            <CardTitle className="text-sm font-medium">Total</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -223,8 +287,17 @@ export function MyTrackersPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Em Trânsito</CardTitle>
+            <Truck className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.inTransit}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Aguardando Instalação</CardTitle>
-            <Package className="h-4 w-4 text-yellow-500" />
+            <PackageCheck className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.received}</div>
@@ -270,7 +343,8 @@ export function MyTrackersPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os Status</SelectItem>
-                <SelectItem value="enviado">Recebidos</SelectItem>
+                <SelectItem value="enviado">Em Trânsito</SelectItem>
+                <SelectItem value="recebido">Recebidos</SelectItem>
                 <SelectItem value="instalado">Instalados</SelectItem>
                 <SelectItem value="defeito">Com Defeito</SelectItem>
               </SelectContent>
@@ -319,6 +393,18 @@ export function MyTrackersPage() {
                     <TableCell>{formatDate(tracker.installed_at)}</TableCell>
                     <TableCell className="text-right">
                       {tracker.status === 'enviado' && (
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            size="sm"
+                            className="bg-blue-600 hover:bg-blue-700"
+                            onClick={() => handleConfirmReceived(tracker)}
+                          >
+                            <PackageCheck className="w-4 h-4 mr-1" />
+                            Receber
+                          </Button>
+                        </div>
+                      )}
+                      {tracker.status === 'recebido' && (
                         <div className="flex gap-2 justify-end">
                           <Button
                             size="sm"

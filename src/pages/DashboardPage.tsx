@@ -9,6 +9,7 @@ interface DashboardStats {
   totalTrackers: number
   trackersInStock: number
   trackersSent: number
+  trackersReceived: number
   trackersInstalled: number
   trackersDefective: number
   totalFranchises: number
@@ -29,6 +30,7 @@ export function DashboardPage() {
     totalTrackers: 0,
     trackersInStock: 0,
     trackersSent: 0,
+    trackersReceived: 0,
     trackersInstalled: 0,
     trackersDefective: 0,
     totalFranchises: 0,
@@ -52,6 +54,7 @@ export function DashboardPage() {
         const statusCounts = {
           estoque: 0,
           enviado: 0,
+          recebido: 0,
           instalado: 0,
           defeito: 0,
         }
@@ -75,6 +78,7 @@ export function DashboardPage() {
           totalTrackers: totalTrackers || 0,
           trackersInStock: statusCounts.estoque,
           trackersSent: statusCounts.enviado,
+          trackersReceived: statusCounts.recebido,
           trackersInstalled: statusCounts.instalado,
           trackersDefective: statusCounts.defeito,
           totalFranchises: franchiseCount,
@@ -84,25 +88,61 @@ export function DashboardPage() {
           .from('tracker_movements')
           .select(`
             id,
+            tracker_id,
             from_status,
             to_status,
-            created_at,
-            trackers!inner(serial_number),
-            franchises(name)
+            to_franchise_id,
+            created_at
           `)
           .order('created_at', { ascending: false })
           .limit(5)
 
-        const { data: movements } = await movementsQuery
+        if (role === 'franqueado' && profile?.franchise_id) {
+          movementsQuery = movementsQuery.eq('to_franchise_id', profile.franchise_id)
+        }
 
-        if (movements) {
+        const { data: movements, error: movementsError } = await movementsQuery
+
+        if (movementsError) {
+          console.error('Error fetching movements:', movementsError)
+        }
+
+        if (movements && movements.length > 0) {
+          // Buscar os serial_numbers dos trackers separadamente
+          const trackerIds = movements.map(m => m.tracker_id)
+          const { data: trackersData } = await supabase
+            .from('trackers')
+            .select('id, serial_number')
+            .in('id', trackerIds)
+
+          const trackerMap = new Map(
+            trackersData?.map(t => [t.id, t.serial_number]) || []
+          )
+
+          // Buscar os nomes das franquias
+          const franchiseIds = movements
+            .map(m => m.to_franchise_id)
+            .filter((id): id is string => id !== null)
+
+          let franchiseMap = new Map<string, string>()
+          if (franchiseIds.length > 0) {
+            const { data: franchisesData } = await supabase
+              .from('franchises')
+              .select('id, name')
+              .in('id', franchiseIds)
+
+            franchiseMap = new Map(
+              franchisesData?.map(f => [f.id, f.name]) || []
+            )
+          }
+
           setRecentMovements(
-            movements.map((m: any) => ({
+            movements.map((m) => ({
               id: m.id,
-              tracker_serial: m.trackers?.serial_number || 'N/A',
+              tracker_serial: trackerMap.get(m.tracker_id) || 'N/A',
               from_status: m.from_status,
               to_status: m.to_status,
-              franchise_name: m.franchises?.name || null,
+              franchise_name: m.to_franchise_id ? franchiseMap.get(m.to_franchise_id) || null : null,
               created_at: m.created_at,
             }))
           )
@@ -123,6 +163,8 @@ export function DashboardPage() {
         return 'Em Estoque'
       case 'enviado':
         return 'Enviado'
+      case 'recebido':
+        return 'Recebido'
       case 'instalado':
         return 'Instalado'
       case 'defeito':
@@ -138,6 +180,8 @@ export function DashboardPage() {
         return <Badge className="bg-[#6B73FF]/10 text-[#6B73FF] border-[#6B73FF]/20">{getStatusLabel(status)}</Badge>
       case 'enviado':
         return <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">{getStatusLabel(status)}</Badge>
+      case 'recebido':
+        return <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">{getStatusLabel(status)}</Badge>
       case 'instalado':
         return <Badge className="bg-[#4ADE80]/10 text-[#22c55e] border-[#4ADE80]/20">{getStatusLabel(status)}</Badge>
       case 'defeito':
@@ -200,8 +244,12 @@ export function DashboardPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Em Estoque</p>
-                <p className="text-3xl font-bold text-[#6B73FF] mt-1">{stats.trackersInStock}</p>
-                <p className="text-xs text-muted-foreground mt-1">Disponíveis para envio</p>
+                <p className="text-3xl font-bold text-[#6B73FF] mt-1">
+                  {role === 'franqueado' ? stats.trackersReceived : stats.trackersInStock}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {role === 'franqueado' ? 'Disponíveis para instalação' : 'Disponíveis para envio'}
+                </p>
               </div>
               <div className="h-14 w-14 rounded-2xl bg-[#6B73FF]/10 flex items-center justify-center">
                 <Archive className="h-7 w-7 text-[#6B73FF]" />
@@ -210,14 +258,18 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Enviados */}
+        {/* Enviados / Em Trânsito */}
         <Card className="border-0 shadow-md hover:shadow-lg transition-shadow">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-muted-foreground">Enviados</p>
+                <p className="text-sm font-medium text-muted-foreground">
+                  {role === 'franqueado' ? 'Em Trânsito' : 'Enviados'}
+                </p>
                 <p className="text-3xl font-bold text-amber-500 mt-1">{stats.trackersSent}</p>
-                <p className="text-xs text-muted-foreground mt-1">Aguardando instalação</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {role === 'franqueado' ? 'A caminho da sua unidade' : 'Aguardando instalação'}
+                </p>
               </div>
               <div className="h-14 w-14 rounded-2xl bg-amber-500/10 flex items-center justify-center">
                 <Truck className="h-7 w-7 text-amber-500" />
@@ -276,24 +328,26 @@ export function DashboardPage() {
                   <div className="h-3 w-3 rounded-full bg-[#6B73FF]" />
                   <span className="font-medium">Em Estoque</span>
                 </div>
-                <span className="font-semibold text-[#1E3A5F]">{stats.trackersInStock}</span>
+                <span className="font-semibold text-[#1E3A5F]">
+                  {role === 'franqueado' ? stats.trackersReceived : stats.trackersInStock}
+                </span>
               </div>
               <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-[#6B73FF] rounded-full transition-all duration-500"
                   style={{
-                    width: `${stats.totalTrackers > 0 ? (stats.trackersInStock / stats.totalTrackers) * 100 : 0}%`,
+                    width: `${stats.totalTrackers > 0 ? ((role === 'franqueado' ? stats.trackersReceived : stats.trackersInStock) / stats.totalTrackers) * 100 : 0}%`,
                   }}
                 />
               </div>
             </div>
 
-            {/* Enviados */}
+            {/* Enviados / Em Trânsito */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
                   <div className="h-3 w-3 rounded-full bg-amber-500" />
-                  <span className="font-medium">Enviados</span>
+                  <span className="font-medium">{role === 'franqueado' ? 'Em Trânsito' : 'Enviados'}</span>
                 </div>
                 <span className="font-semibold text-[#1E3A5F]">{stats.trackersSent}</span>
               </div>

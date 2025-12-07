@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search, Filter, MoreHorizontal, Pencil, Trash2, Send, Map, List } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Plus, Search, Filter, MoreHorizontal, Pencil, Trash2, Send } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/integrations/supabase'
 import type { Tracker, Franchise } from '@/integrations/supabase/types'
@@ -7,9 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { BrazilTrackerMap } from '@/components/BrazilTrackerMap'
-import type { TrackerStateData } from '@/components/BrazilTrackerMap'
-import { BRAZIL_STATES } from '@/lib/constants/brazilStates'
 import {
   Table,
   TableBody,
@@ -34,11 +31,11 @@ import {
 import { Label } from '@/components/ui/label'
 
 interface TrackerWithFranchise extends Tracker {
-  franchises?: { name: string; state: string | null } | null
+  franchises?: { name: string } | null
 }
 
 export function TrackersPage() {
-  const { role } = useAuth()
+  const { role, profile } = useAuth()
   const [trackers, setTrackers] = useState<TrackerWithFranchise[]>([])
   const [franchises, setFranchises] = useState<Franchise[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -47,7 +44,6 @@ export function TrackersPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showSendModal, setShowSendModal] = useState(false)
   const [selectedTracker, setSelectedTracker] = useState<TrackerWithFranchise | null>(null)
-  const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
 
   // Form states
   const [newTracker, setNewTracker] = useState({
@@ -62,7 +58,7 @@ export function TrackersPage() {
     try {
       const { data, error } = await supabase
         .from('trackers')
-        .select('*, franchises(name, state)')
+        .select('*, franchises(name)')
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -115,9 +111,11 @@ export function TrackersPage() {
   }
 
   const handleSendTracker = async () => {
-    if (!selectedTracker || !sendToFranchise) return
+    if (!selectedTracker || !sendToFranchise || !profile?.id) return
 
     try {
+      const previousStatus = selectedTracker.status
+
       const { error } = await supabase
         .from('trackers')
         .update({
@@ -128,6 +126,15 @@ export function TrackersPage() {
         .eq('id', selectedTracker.id)
 
       if (error) throw error
+
+      // Registrar movimentação
+      await supabase.from('tracker_movements').insert({
+        tracker_id: selectedTracker.id,
+        from_status: previousStatus,
+        to_status: 'enviado',
+        to_franchise_id: sendToFranchise,
+        created_by: profile.id,
+      })
 
       setShowSendModal(false)
       setSelectedTracker(null)
@@ -178,80 +185,6 @@ export function TrackersPage() {
     return new Date(dateString).toLocaleDateString('pt-BR')
   }
 
-  // Calcular dados por estado para o mapa
-  const stateMapData = useMemo<Record<string, TrackerStateData>>(() => {
-    // Inicializar todos os estados
-    const base = BRAZIL_STATES.reduce(
-      (acc, state) => {
-        acc[state.code] = {
-          code: state.code,
-          name: state.name,
-          totalSent: 0,
-          totalInstalled: 0,
-          totalDefective: 0,
-          franchises: [],
-        }
-        return acc
-      },
-      {} as Record<string, TrackerStateData>
-    )
-
-    // Agrupar rastreadores por franquia e estado
-    const franchiseMap: Record<string, {
-      name: string
-      state: string
-      sent: number
-      installed: number
-      defective: number
-    }> = {}
-
-    trackers.forEach(tracker => {
-      if (!tracker.franchises?.state) return
-
-      const stateCode = tracker.franchises.state.toUpperCase()
-      const franchiseKey = `${tracker.franchise_id}-${stateCode}`
-
-      if (!franchiseMap[franchiseKey]) {
-        franchiseMap[franchiseKey] = {
-          name: tracker.franchises.name,
-          state: stateCode,
-          sent: 0,
-          installed: 0,
-          defective: 0,
-        }
-      }
-
-      // Contar por status
-      if (tracker.status === 'enviado' || tracker.status === 'instalado' || tracker.status === 'defeito') {
-        franchiseMap[franchiseKey].sent += 1
-      }
-      if (tracker.status === 'instalado') {
-        franchiseMap[franchiseKey].installed += 1
-      }
-      if (tracker.status === 'defeito') {
-        franchiseMap[franchiseKey].defective += 1
-      }
-    })
-
-    // Agregar por estado
-    Object.values(franchiseMap).forEach(franchise => {
-      const stateCode = franchise.state
-      if (base[stateCode]) {
-        base[stateCode].totalSent += franchise.sent
-        base[stateCode].totalInstalled += franchise.installed
-        base[stateCode].totalDefective += franchise.defective
-        base[stateCode].franchises.push({
-          name: franchise.name,
-          sent: franchise.sent,
-          installed: franchise.installed,
-          defective: franchise.defective,
-        })
-      }
-    })
-
-    return base
-  }, [trackers])
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -259,35 +192,12 @@ export function TrackersPage() {
           <h1 className="text-2xl font-bold">Rastreadores</h1>
           <p className="text-muted-foreground">Gerencie o estoque de rastreadores</p>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Toggle View Buttons */}
-          <div className="flex border rounded-lg overflow-hidden">
-            <Button
-              variant={viewMode === 'list' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('list')}
-              className="rounded-none"
-            >
-              <List className="w-4 h-4 mr-1" />
-              Lista
-            </Button>
-            <Button
-              variant={viewMode === 'map' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setViewMode('map')}
-              className="rounded-none"
-            >
-              <Map className="w-4 h-4 mr-1" />
-              Mapa
-            </Button>
-          </div>
-          {(role === 'admin' || role === 'matriz') && (
-            <Button onClick={() => setShowAddModal(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Adicionar Rastreador
-            </Button>
-          )}
-        </div>
+        {(role === 'admin' || role === 'matriz') && (
+          <Button onClick={() => setShowAddModal(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Adicionar Rastreador
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
@@ -320,20 +230,7 @@ export function TrackersPage() {
         </CardContent>
       </Card>
 
-      {/* Map View */}
-      {viewMode === 'map' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Distribuição de Rastreadores por Estado</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <BrazilTrackerMap states={stateMapData} />
-          </CardContent>
-        </Card>
-      )}
-
       {/* Trackers Table */}
-      {viewMode === 'list' && (
       <Card>
         <CardHeader>
           <CardTitle>Lista de Rastreadores ({filteredTrackers.length})</CardTitle>
@@ -413,7 +310,6 @@ export function TrackersPage() {
           </Table>
         </CardContent>
       </Card>
-      )}
 
       {/* Add Tracker Modal */}
       {showAddModal && (
